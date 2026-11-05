@@ -1,0 +1,783 @@
+<!DOCTYPE html>
+<!--
+  ============================================================================
+  Facturation mensuelle d'un prestataire
+  ----------------------------------------------------------------------------
+  Application 100 % statique (HTML + CSS + JavaScript), sans backend.
+  Compatible GitHub Pages : déposez simplement ce fichier (index.html)
+  à la racine du dépôt, puis activez Pages (Settings > Pages).
+
+  - Données enregistrées uniquement dans le navigateur (localStorage).
+  - PDF généré avec jsPDF + jsPDF-AutoTable (chargés depuis cdnjs).
+  ============================================================================
+-->
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Facturation mensuelle – Prestataire</title>
+<meta name="description" content="Calcul automatique de la facturation mensuelle d'un prestataire : jours ouvrés, absences, heures supplémentaires et facture PDF.">
+
+<style>
+/* ===================== Thème ===================== */
+:root{
+  --bg:#f3f5fb; --surface:#ffffff; --text:#1c2333; --muted:#6b7490;
+  --primary:#3b5bdb; --primary-dark:#2f49b5; --primary-soft:#e7ecff;
+  --ok:#2b9348; --warn:#e8590c; --warn-soft:#fff0e6; --danger:#d6336c;
+  --border:#e1e5f0; --shadow:0 4px 18px rgba(30,45,100,.08);
+  --radius:14px;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{
+  margin:0; font-family:"Segoe UI",system-ui,-apple-system,Roboto,Helvetica,Arial,sans-serif;
+  background:var(--bg); color:var(--text); line-height:1.45;
+}
+header.top{
+  background:linear-gradient(135deg,#2f49b5,#4c6ef5 60%,#6f8bff); color:#fff;
+  padding:28px 20px 70px;
+}
+.wrap{max-width:1180px; margin:0 auto}
+header.top h1{margin:0 0 4px; font-size:1.7rem; letter-spacing:.2px}
+header.top p{margin:0; opacity:.9}
+main.wrap{margin-top:-48px; padding:0 16px 40px}
+
+.card{
+  background:var(--surface); border-radius:var(--radius); box-shadow:var(--shadow);
+  padding:20px; margin-bottom:18px; border:1px solid var(--border);
+}
+.card h2{margin:0 0 14px; font-size:1.1rem; display:flex; align-items:center; gap:8px}
+.card h2 .n{
+  background:var(--primary-soft); color:var(--primary); width:26px; height:26px;
+  border-radius:50%; display:inline-flex; align-items:center; justify-content:center; font-size:.85rem
+}
+
+/* ===================== Formulaires ===================== */
+.grid{display:grid; gap:14px}
+.grid.f{grid-template-columns:repeat(auto-fit,minmax(210px,1fr))}
+label.fld{display:flex; flex-direction:column; gap:5px; font-size:.85rem; font-weight:600; color:var(--muted)}
+input[type=text],input[type=number],input[type=date],select{
+  font:inherit; color:var(--text); padding:10px 12px; border:1.5px solid var(--border);
+  border-radius:10px; background:#fff; width:100%; transition:border-color .15s, box-shadow .15s;
+}
+input:focus,select:focus{outline:none; border-color:var(--primary); box-shadow:0 0 0 3px var(--primary-soft)}
+input.invalid{border-color:var(--danger); background:#fff5f8}
+.err{color:var(--danger); font-size:.78rem; font-weight:500; min-height:0}
+.row2{display:grid; grid-template-columns:2fr 1fr; gap:10px}
+
+button{
+  font:inherit; cursor:pointer; border:0; border-radius:10px; padding:10px 16px; font-weight:600;
+  transition:transform .05s, background .15s, opacity .15s;
+}
+button:active{transform:translateY(1px)}
+.btn-primary{background:var(--primary); color:#fff}
+.btn-primary:hover{background:var(--primary-dark)}
+.btn-primary:disabled{opacity:.45; cursor:not-allowed}
+.btn-ghost{background:#fff; color:var(--danger); border:1.5px solid #f3c1d3}
+.btn-ghost:hover{background:#fff5f8}
+.btn-small{padding:6px 10px; font-size:.82rem; background:var(--primary-soft); color:var(--primary)}
+
+/* ===================== Tableau de bord ===================== */
+.kpis{display:grid; gap:14px; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); margin-bottom:6px}
+.kpi{border:1px solid var(--border); border-radius:12px; padding:14px; background:#fafbff}
+.kpi .l{font-size:.78rem; color:var(--muted); font-weight:600; text-transform:uppercase; letter-spacing:.4px}
+.kpi .v{font-size:1.5rem; font-weight:700; margin-top:4px}
+.kpi.total{
+  grid-column:1/-1; background:linear-gradient(135deg,#2f49b5,#4c6ef5); color:#fff; border:0;
+  display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;
+}
+.kpi.total .l{color:#dbe3ff}
+.kpi.total .v{font-size:2.1rem}
+.kpi.total small{opacity:.85}
+
+table.calc{width:100%; border-collapse:collapse; margin-top:12px; font-size:.93rem}
+table.calc th,table.calc td{padding:9px 10px; border-bottom:1px solid var(--border); text-align:left}
+table.calc th{font-size:.78rem; text-transform:uppercase; color:var(--muted); letter-spacing:.4px}
+table.calc td.r,table.calc th.r{text-align:right; font-variant-numeric:tabular-nums}
+table.calc td.f{color:var(--muted); font-size:.82rem}
+table.calc tr.sub td{font-weight:700; background:#fafbff}
+table.calc tr.tot td{font-weight:800; font-size:1.05rem; background:var(--primary-soft); color:var(--primary-dark)}
+table.calc tr.info td{color:var(--muted); font-style:italic}
+.note{font-size:.8rem; color:var(--muted); margin-top:8px}
+
+/* ===================== Calendrier ===================== */
+.cal-head,.cal{display:grid; grid-template-columns:repeat(7,1fr); gap:6px}
+.cal-head div{text-align:center; font-weight:700; font-size:.78rem; color:var(--muted); padding:4px 0; text-transform:uppercase}
+.day{
+  border:1.5px solid var(--border); border-radius:10px; padding:7px; min-height:104px;
+  display:flex; flex-direction:column; gap:5px; background:#fff;
+}
+.day.blank{border:0; background:transparent; min-height:0}
+.day.weekend{background:#f5f6fa; color:#9aa2ba}
+.day.holiday{background:var(--warn-soft); border-color:#ffd2b3}
+.day.absent{background:#fff0f4; border-color:#f6b8cc}
+.day .top{display:flex; justify-content:space-between; align-items:baseline}
+.day .num{font-weight:700}
+.day .dow{display:none; font-size:.8rem; color:var(--muted)}
+.tag{font-size:.68rem; font-weight:700; color:var(--warn); line-height:1.15}
+.abs-btn{
+  background:#fff; color:var(--muted); border:1.5px solid var(--border); padding:4px 6px; font-size:.75rem;
+  border-radius:8px; width:100%;
+}
+.abs-btn[aria-pressed=true]{background:var(--danger); color:#fff; border-color:var(--danger)}
+.ot{display:flex; flex-direction:column; font-size:.68rem; color:var(--muted); font-weight:600; gap:2px}
+.ot input{padding:4px 6px; font-size:.85rem; border-radius:8px}
+.ot input:disabled{background:#f0f0f4; opacity:.6}
+.legend{display:flex; flex-wrap:wrap; gap:14px; font-size:.8rem; color:var(--muted); margin-bottom:12px}
+.legend i{display:inline-block; width:12px; height:12px; border-radius:3px; margin-right:5px; vertical-align:-1px; border:1.5px solid var(--border)}
+
+/* ===================== Jours fériés ===================== */
+.hol-list{display:flex; flex-direction:column; gap:6px; margin-bottom:12px}
+.hol-item{
+  display:flex; align-items:center; gap:10px; padding:8px 10px; border:1px solid var(--border);
+  border-radius:10px; background:#fafbff; font-size:.9rem; flex-wrap:wrap;
+}
+.hol-item input{width:auto}
+.hol-item .lbl{flex:1; min-width:160px}
+.hol-item .meta{color:var(--muted); font-size:.78rem}
+.hol-add{display:grid; grid-template-columns:170px 1fr auto; gap:8px; align-items:end}
+
+footer{text-align:center; color:var(--muted); font-size:.8rem; padding:10px 0 30px}
+.actions{display:flex; gap:10px; flex-wrap:wrap; margin-top:6px}
+
+/* ===================== Responsive ===================== */
+@media (max-width:760px){
+  header.top h1{font-size:1.35rem}
+  .row2{grid-template-columns:1fr}
+  .hol-add{grid-template-columns:1fr}
+  .cal-head{display:none}
+  .cal{grid-template-columns:1fr}
+  .day.blank,.day.weekend{display:none}
+  .day{min-height:0; flex-direction:row; align-items:center; flex-wrap:wrap; gap:10px}
+  .day .top{min-width:120px; gap:8px; justify-content:flex-start}
+  .day .dow{display:inline}
+  .abs-btn{width:auto; min-width:90px}
+  .ot{flex-direction:row; align-items:center; gap:6px; font-size:.78rem}
+  .ot input{width:90px}
+  .kpi .v{font-size:1.25rem}
+  .kpi.total .v{font-size:1.7rem}
+}
+@media print{ header.top,.actions,#calendarCard,#holCard,#paramsCard{display:none} }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="wrap">
+    <h1>Facturation mensuelle d'un prestataire</h1>
+    <p>Jours ouvrés, absences et heures supplémentaires calculés automatiquement.</p>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <!-- ============ 1. PARAMÈTRES ============ -->
+  <section class="card" id="paramsCard">
+    <h2><span class="n">1</span> Paramètres de facturation</h2>
+    <div class="grid f">
+      <label class="fld">Nom du prestataire
+        <input type="text" id="prestataire" placeholder="Ex. Jean Dupont" autocomplete="off">
+      </label>
+      <label class="fld">Client / société
+        <input type="text" id="client" placeholder="Ex. Société Exemple SAS" autocomplete="off">
+      </label>
+      <label class="fld">Mois de facturation
+        <select id="month"></select>
+      </label>
+      <label class="fld">Année
+        <input type="number" id="year" min="2000" max="2100" step="1">
+        <span class="err" id="err-year"></span>
+      </label>
+      <label class="fld">Tarif horaire (€ HT)
+        <input type="number" id="rate" min="0" max="10000" step="0.01" inputmode="decimal">
+        <span class="err" id="err-rate"></span>
+      </label>
+      <label class="fld">Heures normales par jour
+        <input type="number" id="hpd" min="0" max="24" step="0.25" inputmode="decimal">
+        <span class="err" id="err-hpd"></span>
+      </label>
+      <label class="fld">Majoration heures sup. (%)
+        <input type="number" id="maj" min="0" max="300" step="0.5" inputmode="decimal">
+        <span class="err" id="err-maj"></span>
+      </label>
+    </div>
+  </section>
+
+  <!-- ============ 2. TABLEAU DE BORD ============ -->
+  <section class="card" id="dashCard">
+    <h2><span class="n">2</span> Tableau de bord – <span id="periodLabel"></span></h2>
+    <div class="kpis">
+      <div class="kpi"><div class="l">Jours ouvrés</div><div class="v" id="k-ouvres">–</div></div>
+      <div class="kpi"><div class="l">Jours fériés exclus</div><div class="v" id="k-feries">–</div></div>
+      <div class="kpi"><div class="l">Jours d'absence</div><div class="v" id="k-abs">–</div></div>
+      <div class="kpi"><div class="l">Jours facturables</div><div class="v" id="k-fact">–</div></div>
+      <div class="kpi"><div class="l">Heures normales</div><div class="v" id="k-hn">–</div></div>
+      <div class="kpi"><div class="l">Heures supplémentaires</div><div class="v" id="k-hs">–</div></div>
+      <div class="kpi total">
+        <div><div class="l">Total HT à facturer</div><small id="k-sub"></small></div>
+        <div class="v" id="k-total">–</div>
+      </div>
+    </div>
+
+    <table class="calc" aria-label="Détail du calcul">
+      <thead><tr><th>Poste</th><th>Calcul</th><th class="r">Valeur</th></tr></thead>
+      <tbody id="calcBody"></tbody>
+    </table>
+    <p class="note">Les absences sont déjà exclues des heures normales facturables : la ligne « montant déduit » est indicative et n'est <strong>pas</strong> soustraite une seconde fois du total.</p>
+
+    <div class="actions">
+      <button class="btn-primary" id="btnPdf">📄 Générer la facture détaillée en PDF</button>
+      <button class="btn-ghost" id="btnReset">↺ Réinitialiser les données du mois</button>
+    </div>
+    <div class="err" id="pdfErr" style="margin-top:8px"></div>
+  </section>
+
+  <!-- ============ 3. CALENDRIER ============ -->
+  <section class="card" id="calendarCard">
+    <h2><span class="n">3</span> Calendrier : absences et heures supplémentaires</h2>
+    <div class="legend">
+      <span><i style="background:#fff"></i>Jour ouvré</span>
+      <span><i style="background:#fff0f4;border-color:#f6b8cc"></i>Absence</span>
+      <span><i style="background:#fff0e6;border-color:#ffd2b3"></i>Jour férié</span>
+      <span><i style="background:#f5f6fa"></i>Week-end</span>
+    </div>
+    <div class="cal-head"><div>Lun</div><div>Mar</div><div>Mer</div><div>Jeu</div><div>Ven</div><div>Sam</div><div>Dim</div></div>
+    <div class="cal" id="cal"></div>
+    <p class="note">Cliquez sur « Absent » pour déduire un jour. Saisissez les heures supplémentaires (par pas de 0,25 h) pour chaque jour travaillé ; 0 par défaut.</p>
+  </section>
+
+  <!-- ============ 4. JOURS FÉRIÉS ============ -->
+  <section class="card" id="holCard">
+    <h2><span class="n">4</span> Jours fériés du mois (modifiables)</h2>
+    <div class="hol-list" id="holList"></div>
+    <div class="hol-add">
+      <label class="fld">Ajouter un jour férié / de fermeture
+        <input type="date" id="holDate">
+      </label>
+      <label class="fld">Libellé
+        <input type="text" id="holLabel" placeholder="Ex. Pont, fermeture client…">
+      </label>
+      <button class="btn-small" id="holAddBtn">+ Ajouter</button>
+    </div>
+    <div class="err" id="holErr"></div>
+    <p class="note">Les jours fériés nationaux français (dont Lundi de Pâques, Ascension et Lundi de Pentecôte) sont calculés automatiquement. Décochez-en un pour le considérer comme travaillé.</p>
+  </section>
+
+</main>
+<footer>Vos données restent dans ce navigateur (aucun envoi sur Internet).</footer>
+
+<!-- Bibliothèques PDF (CDN cdnjs) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+
+<script>
+/* ============================================================================
+   NOYAU DE CALCUL (pur, sans accès au DOM — testable séparément)
+   ========================================================================== */
+/*CORE-START*/
+const MOIS = ["Janvier","Février","Mars","Avril","Mai","Juin","Juillet","Août","Septembre","Octobre","Novembre","Décembre"];
+
+const pad = n => String(n).padStart(2, "0");
+/** Date ISO "AAAA-MM-JJ" (sans fuseau horaire). */
+const iso = (y, m, d) => `${y}-${pad(m)}-${pad(d)}`;
+const daysInMonth = (y, m) => new Date(y, m, 0).getDate();
+/** Jour de la semaine : 0 = lundi … 6 = dimanche. */
+const weekdayIdx = (y, m, d) => (new Date(y, m - 1, d).getDay() + 6) % 7;
+const round2 = x => Math.round((x + Number.EPSILON) * 100) / 100;
+
+/** Date de Pâques (algorithme de Meeus/Jones/Butcher, calendrier grégorien). */
+function easterSunday(year) {
+  const a = year % 19, b = Math.floor(year / 100), c = year % 100;
+  const d = Math.floor(b / 4), e = b % 4, f = Math.floor((b + 8) / 25);
+  const g = Math.floor((b - f + 1) / 3);
+  const h = (19 * a + b - d - g + 15) % 30;
+  const i = Math.floor(c / 4), k = c % 4;
+  const l = (32 + 2 * e + 2 * i - h - k) % 7;
+  const m = Math.floor((a + 11 * h + 22 * l) / 451);
+  const month = Math.floor((h + l - 7 * m + 114) / 31);
+  const day = ((h + l - 7 * m + 114) % 31) + 1;
+  return new Date(year, month - 1, day);
+}
+function addDays(date, n) { const d = new Date(date); d.setDate(d.getDate() + n); return d; }
+const isoFromDate = d => iso(d.getFullYear(), d.getMonth() + 1, d.getDate());
+
+/** Jours fériés nationaux français d'une année : [{date, label}]. */
+function frenchHolidays(year) {
+  const easter = easterSunday(year);
+  return [
+    { date: iso(year, 1, 1),   label: "Jour de l'An" },
+    { date: isoFromDate(addDays(easter, 1)),  label: "Lundi de Pâques" },
+    { date: iso(year, 5, 1),   label: "Fête du Travail" },
+    { date: iso(year, 5, 8),   label: "Victoire 1945" },
+    { date: isoFromDate(addDays(easter, 39)), label: "Ascension" },
+    { date: isoFromDate(addDays(easter, 50)), label: "Lundi de Pentecôte" },
+    { date: iso(year, 7, 14),  label: "Fête nationale" },
+    { date: iso(year, 8, 15),  label: "Assomption" },
+    { date: iso(year, 11, 1),  label: "Toussaint" },
+    { date: iso(year, 11, 11), label: "Armistice 1918" },
+    { date: iso(year, 12, 25), label: "Noël" }
+  ];
+}
+
+/**
+ * Liste des jours fériés du mois, avec leur état (appliqué ou non).
+ * data = { holidayOff: [iso], holidayExtra: [{date,label}] }
+ */
+function monthHolidays(year, month, data) {
+  const prefix = `${year}-${pad(month)}-`;
+  const off = new Set((data && data.holidayOff) || []);
+  const list = frenchHolidays(year)
+    .filter(h => h.date.startsWith(prefix))
+    .map(h => ({ ...h, custom: false, active: !off.has(h.date) }));
+  ((data && data.holidayExtra) || []).forEach(h => {
+    if (h.date.startsWith(prefix) && !list.some(x => x.date === h.date))
+      list.push({ date: h.date, label: h.label || "Jour spécifique", custom: true, active: true });
+  });
+  list.sort((a, b) => a.date.localeCompare(b.date));
+  list.forEach(h => { h.weekend = weekdayIdx(+h.date.slice(0, 4), +h.date.slice(5, 7), +h.date.slice(8)) >= 5; });
+  return list;
+}
+
+/**
+ * Calcul complet de la facturation.
+ * s = { year, month, rate, hpd, maj }
+ * data = { absences:[iso], overtime:{iso:heures}, holidayOff:[], holidayExtra:[] }
+ */
+function computeBilling(s, data) {
+  data = data || {};
+  const nb = daysInMonth(s.year, s.month);
+  const holidays = monthHolidays(s.year, s.month, data);
+  const holSet = new Set(holidays.filter(h => h.active).map(h => h.date));
+
+  const weekdays = [];       // lundi-vendredi
+  const holidaysExcluded = []; // fériés tombant un jour de semaine
+  const workingDays = [];    // jours ouvrés (hors fériés)
+  for (let d = 1; d <= nb; d++) {
+    if (weekdayIdx(s.year, s.month, d) >= 5) continue;
+    const key = iso(s.year, s.month, d);
+    weekdays.push(key);
+    if (holSet.has(key)) holidaysExcluded.push(key); else workingDays.push(key);
+  }
+  const workSet = new Set(workingDays);
+
+  // Absences valides = uniquement des jours ouvrés
+  const absences = [...new Set(data.absences || [])].filter(k => workSet.has(k)).sort();
+  const absSet = new Set(absences);
+
+  // Heures supplémentaires : uniquement jours ouvrés non absents, valeur > 0
+  const overtime = [];
+  workingDays.forEach(k => {
+    const h = Number((data.overtime || {})[k]);
+    if (!absSet.has(k) && isFinite(h) && h > 0) overtime.push({ date: k, hours: h });
+  });
+
+  const joursOuvres = workingDays.length;
+  const joursFeries = holidaysExcluded.length;
+  const joursAbsence = absences.length;
+  const joursFacturables = joursOuvres - joursAbsence;
+  const heuresNormales = joursFacturables * s.hpd;
+  const heuresSup = overtime.reduce((t, o) => t + o.hours, 0);
+  const tauxHS = s.rate * (1 + s.maj / 100);
+
+  const montantNormal = round2(heuresNormales * s.rate);
+  const montantHS = round2(heuresSup * tauxHS);
+  const montantAbsences = round2(joursAbsence * s.hpd * s.rate); // indicatif (déjà exclu)
+  const total = round2(montantNormal + montantHS);
+
+  return {
+    joursOuvres, joursFeries, joursAbsence, joursFacturables,
+    heuresNormales, heuresSup, tauxHS: round2(tauxHS),
+    montantNormal, montantHS, montantAbsences, total,
+    montantTheorique: round2(joursOuvres * s.hpd * s.rate),
+    holidays, holidaysExcluded, absences, overtime
+  };
+}
+/*CORE-END*/
+
+/* ============================================================================
+   ÉTAT, PERSISTANCE (localStorage)
+   ========================================================================== */
+const STORE_KEY = "facturation-prestataire-v1";
+const now = new Date();
+let state = {
+  settings: {
+    prestataire: "", client: "",
+    month: now.getMonth() + 1, year: now.getFullYear(),
+    rate: 50, hpd: 7, maj: 25
+  },
+  months: {}   // clé "AAAA-MM" -> { absences, overtime, holidayOff, holidayExtra }
+};
+
+function loadState() {
+  try {
+    const raw = localStorage.getItem(STORE_KEY);
+    if (!raw) return;
+    const p = JSON.parse(raw);
+    if (p && p.settings) state.settings = { ...state.settings, ...p.settings };
+    if (p && p.months) state.months = p.months;
+  } catch (e) { /* stockage indisponible ou corrompu : on ignore */ }
+}
+function saveState() {
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch (e) { /* ignore */ }
+}
+const monthKey = () => `${state.settings.year}-${pad(state.settings.month)}`;
+function monthData() {
+  const k = monthKey();
+  if (!state.months[k]) state.months[k] = { absences: [], overtime: {}, holidayOff: [], holidayExtra: [] };
+  const d = state.months[k];
+  d.absences = d.absences || []; d.overtime = d.overtime || {};
+  d.holidayOff = d.holidayOff || []; d.holidayExtra = d.holidayExtra || [];
+  return d;
+}
+
+/* ============================================================================
+   UTILITAIRES D'AFFICHAGE
+   ========================================================================== */
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const fmtMoney = n => n.toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €";
+const fmtNum = n => n.toLocaleString("fr-FR", { maximumFractionDigits: 2 });
+const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
+function fmtDateLong(key) {
+  const [y, m, d] = key.split("-").map(Number);
+  return cap(new Date(y, m - 1, d).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric" }));
+}
+/** jsPDF (polices standard) n'aime pas les espaces insécables fines. */
+const pdfTxt = s => String(s).replace(/[\u202f\u00a0]/g, " ");
+
+/* ============================================================================
+   VALIDATION DES SAISIES
+   ========================================================================== */
+let hasInvalid = false;
+/** Lit un champ numérique ; signale l'erreur ; renvoie une valeur utilisable (bornée). */
+function readNum(id, min, max, fallback, label) {
+  const el = $(id), err = $("err-" + id);
+  const raw = el.value.trim().replace(",", ".");
+  let v = raw === "" ? NaN : Number(raw);
+  let msg = "";
+  if (!isFinite(v)) { msg = `${label} : valeur requise.`; v = fallback; }
+  else if (v < min) { msg = `${label} : minimum ${fmtNum(min)}.`; v = min; }
+  else if (v > max) { msg = `${label} : maximum ${fmtNum(max)}.`; v = max; }
+  el.classList.toggle("invalid", !!msg);
+  if (err) err.textContent = msg;
+  if (msg) hasInvalid = true;
+  return v;
+}
+function readSettings() {
+  hasInvalid = false;
+  const s = state.settings;
+  s.prestataire = $("prestataire").value.trim();
+  s.client = $("client").value.trim();
+  s.month = Number($("month").value);
+  s.year = Math.round(readNum("year", 2000, 2100, now.getFullYear(), "Année"));
+  s.rate = readNum("rate", 0, 10000, 0, "Tarif horaire");
+  s.hpd = readNum("hpd", 0, 24, 0, "Heures par jour");
+  s.maj = readNum("maj", 0, 300, 0, "Majoration");
+}
+
+/* ============================================================================
+   RENDU
+   ========================================================================== */
+function renderCalendar() {
+  const s = state.settings, data = monthData();
+  const res = computeBilling(s, data);
+  const holMap = new Map(res.holidays.filter(h => h.active).map(h => [h.date, h]));
+  const absSet = new Set(data.absences);
+  const nb = daysInMonth(s.year, s.month);
+  const lead = weekdayIdx(s.year, s.month, 1);
+  const dows = ["lun.", "mar.", "mer.", "jeu.", "ven.", "sam.", "dim."];
+  let html = "";
+  for (let i = 0; i < lead; i++) html += '<div class="day blank"></div>';
+  for (let d = 1; d <= nb; d++) {
+    const key = iso(s.year, s.month, d), wd = weekdayIdx(s.year, s.month, d);
+    const head = `<div class="top"><span class="num">${d}</span><span class="dow">${dows[wd]}</span></div>`;
+    if (wd >= 5) {
+      html += `<div class="day weekend">${head}</div>`;
+    } else if (holMap.has(key)) {
+      html += `<div class="day holiday">${head}<span class="tag">${esc(holMap.get(key).label)}</span></div>`;
+    } else {
+      const abs = absSet.has(key);
+      const ot = data.overtime[key] ?? "";
+      html += `<div class="day${abs ? " absent" : ""}">${head}
+        <button type="button" class="abs-btn" data-abs="${key}" aria-pressed="${abs}">${abs ? "Absent" : "Présent"}</button>
+        <label class="ot">Heures sup.
+          <input type="number" min="0" max="24" step="0.25" inputmode="decimal" placeholder="0"
+                 data-ot="${key}" value="${ot}" ${abs ? "disabled" : ""}>
+        </label></div>`;
+    }
+  }
+  $("cal").innerHTML = html;
+}
+
+function renderHolidays() {
+  const s = state.settings, data = monthData();
+  const list = monthHolidays(s.year, s.month, data);
+  if (!list.length) {
+    $("holList").innerHTML = '<div class="note">Aucun jour férié national ce mois-ci.</div>';
+  } else {
+    $("holList").innerHTML = list.map(h => `
+      <div class="hol-item">
+        ${h.custom ? "" : `<input type="checkbox" data-hol="${h.date}" ${h.active ? "checked" : ""} aria-label="Appliquer ${esc(h.label)}">`}
+        <span class="lbl"><strong>${esc(h.label)}</strong> – ${esc(fmtDateLong(h.date))}</span>
+        <span class="meta">${h.weekend ? "tombe un week-end (sans effet)" : (h.custom ? "ajouté manuellement" : "")}</span>
+        ${h.custom ? `<button class="btn-small" type="button" data-holdel="${h.date}">Supprimer</button>` : ""}
+      </div>`).join("");
+  }
+  const first = iso(s.year, s.month, 1), last = iso(s.year, s.month, daysInMonth(s.year, s.month));
+  $("holDate").min = first; $("holDate").max = last;
+  if (!$("holDate").value || $("holDate").value < first || $("holDate").value > last) $("holDate").value = "";
+}
+
+function renderResults() {
+  const s = state.settings, data = monthData();
+  const r = computeBilling(s, data);
+  $("periodLabel").textContent = `${MOIS[s.month - 1]} ${s.year}`;
+  $("k-ouvres").textContent = r.joursOuvres;
+  $("k-feries").textContent = r.joursFeries;
+  $("k-abs").textContent = r.joursAbsence;
+  $("k-fact").textContent = r.joursFacturables;
+  $("k-hn").textContent = fmtNum(r.heuresNormales) + " h";
+  $("k-hs").textContent = fmtNum(r.heuresSup) + " h";
+  $("k-total").textContent = fmtMoney(r.total);
+  $("k-sub").textContent = `Normales ${fmtMoney(r.montantNormal)} + Heures sup. ${fmtMoney(r.montantHS)}`;
+
+  const rows = [
+    ["Jours ouvrés (lun.–ven., hors fériés)", "", r.joursOuvres, ""],
+    ["Jours fériés exclus (en semaine)", "", r.joursFeries, ""],
+    ["Jours d'absence", "", r.joursAbsence, ""],
+    ["Jours facturables", `${r.joursOuvres} − ${r.joursAbsence}`, r.joursFacturables, "sub"],
+    ["Heures normales facturables", `${r.joursFacturables} × ${fmtNum(s.hpd)} h`, fmtNum(r.heuresNormales) + " h", ""],
+    ["Heures supplémentaires (total)", `somme des ${r.overtime.length} jour(s) saisi(s)`, fmtNum(r.heuresSup) + " h", ""],
+    ["Montant des heures normales", `${fmtNum(r.heuresNormales)} h × ${fmtMoney(s.rate)}`, fmtMoney(r.montantNormal), ""],
+    ["Montant des heures supplémentaires", `${fmtNum(r.heuresSup)} h × ${fmtMoney(s.rate)} × (1 + ${fmtNum(s.maj)} %)`, fmtMoney(r.montantHS), ""],
+    ["Montant déduit pour les absences (indicatif)", `${r.joursAbsence} j × ${fmtNum(s.hpd)} h × ${fmtMoney(s.rate)}`, fmtMoney(r.montantAbsences), "info"],
+    ["TOTAL HT À FACTURER", "heures normales + heures supplémentaires", fmtMoney(r.total), "tot"]
+  ];
+  $("calcBody").innerHTML = rows.map(([a, b, c, cls]) =>
+    `<tr class="${cls}"><td>${a}</td><td class="f">${b}</td><td class="r">${c}</td></tr>`).join("");
+  $("btnPdf").disabled = hasInvalid;
+  $("pdfErr").textContent = hasInvalid ? "Corrigez les champs en rouge pour générer le PDF." : "";
+  return r;
+}
+
+function renderAll() { renderCalendar(); renderHolidays(); renderResults(); }
+
+/* ============================================================================
+   ÉVÉNEMENTS
+   ========================================================================== */
+function onSettingsChange(e) {
+  const monthChanged = e && (e.target.id === "month" || e.target.id === "year");
+  readSettings(); saveState();
+  if (monthChanged && !hasInvalid) renderAll(); else renderResults();
+}
+["prestataire", "client", "month", "year", "rate", "hpd", "maj"].forEach(id => {
+  $(id).addEventListener("input", onSettingsChange);
+  $(id).addEventListener("change", onSettingsChange);
+});
+
+// Absences (délégation)
+$("cal").addEventListener("click", e => {
+  const b = e.target.closest("[data-abs]"); if (!b) return;
+  const key = b.dataset.abs, data = monthData(), i = data.absences.indexOf(key);
+  if (i >= 0) data.absences.splice(i, 1); else data.absences.push(key);
+  saveState(); renderCalendar(); renderResults();
+});
+// Heures supplémentaires (pas de re-rendu du calendrier pour garder le focus)
+$("cal").addEventListener("input", e => {
+  const inp = e.target.closest("[data-ot]"); if (!inp) return;
+  const key = inp.dataset.ot, data = monthData();
+  let v = Number(String(inp.value).replace(",", "."));
+  if (inp.value === "" || !isFinite(v) || v <= 0) { delete data.overtime[key]; inp.classList.toggle("invalid", inp.value !== "" && v < 0); }
+  else if (v > 24) { data.overtime[key] = 24; inp.classList.add("invalid"); }
+  else { data.overtime[key] = v; inp.classList.remove("invalid"); }
+  if (inp.value !== "" && v < 0) inp.classList.add("invalid");
+  saveState(); renderResults();
+});
+$("cal").addEventListener("change", e => {   // normalise la valeur affichée à la sortie du champ
+  const inp = e.target.closest("[data-ot]"); if (!inp) return;
+  const v = monthData().overtime[inp.dataset.ot];
+  inp.value = v === undefined ? "" : v; inp.classList.remove("invalid");
+});
+
+// Jours fériés
+$("holList").addEventListener("change", e => {
+  const c = e.target.closest("[data-hol]"); if (!c) return;
+  const data = monthData(), key = c.dataset.hol, i = data.holidayOff.indexOf(key);
+  if (c.checked && i >= 0) data.holidayOff.splice(i, 1);
+  if (!c.checked && i < 0) data.holidayOff.push(key);
+  saveState(); renderAll();
+});
+$("holList").addEventListener("click", e => {
+  const b = e.target.closest("[data-holdel]"); if (!b) return;
+  const data = monthData();
+  data.holidayExtra = data.holidayExtra.filter(h => h.date !== b.dataset.holdel);
+  saveState(); renderAll();
+});
+$("holAddBtn").addEventListener("click", () => {
+  const date = $("holDate").value, label = $("holLabel").value.trim();
+  const s = state.settings, prefix = `${s.year}-${pad(s.month)}-`;
+  if (!date || !date.startsWith(prefix)) { $("holErr").textContent = "Choisissez une date comprise dans le mois affiché."; return; }
+  const data = monthData();
+  if (monthHolidays(s.year, s.month, data).some(h => h.date === date)) { $("holErr").textContent = "Cette date est déjà dans la liste."; return; }
+  data.holidayExtra.push({ date, label: label || "Jour spécifique" });
+  $("holErr").textContent = ""; $("holDate").value = ""; $("holLabel").value = "";
+  saveState(); renderAll();
+});
+
+// Réinitialisation du mois
+$("btnReset").addEventListener("click", () => {
+  if (!confirm(`Réinitialiser les absences, heures supplémentaires et jours fériés modifiés de ${MOIS[state.settings.month - 1]} ${state.settings.year} ?`)) return;
+  delete state.months[monthKey()];
+  saveState(); renderAll();
+});
+
+/* ============================================================================
+   GÉNÉRATION DU PDF
+   ========================================================================== */
+function generatePdf() {
+  if (!window.jspdf || !window.jspdf.jsPDF) { alert("La bibliothèque PDF n'a pas pu être chargée (connexion Internet requise au premier chargement)."); return; }
+  readSettings();
+  if (hasInvalid) { renderResults(); return; }
+  const s = state.settings, r = computeBilling(s, monthData());
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit: "mm", format: "a4" });
+  const W = doc.internal.pageSize.getWidth(), M = 16;
+  const BLUE = [47, 73, 181], LIGHT = [231, 236, 255], GREY = [107, 116, 144];
+  const period = `${MOIS[s.month - 1]} ${s.year}`;
+  const invNo = `FAC-${s.year}-${pad(s.month)}`;
+  const T = pdfTxt;
+
+  // ----- En-tête -----
+  doc.setFillColor(...BLUE); doc.rect(0, 0, W, 34, "F");
+  doc.setTextColor(255); doc.setFont("helvetica", "bold"); doc.setFontSize(20);
+  doc.text("FACTURE DÉTAILLÉE", M, 16);
+  doc.setFont("helvetica", "normal"); doc.setFontSize(11);
+  doc.text(T(`Prestations du mois de ${period}`), M, 24);
+  doc.text(T(`N° ${invNo}`), W - M, 16, { align: "right" });
+  doc.text(T(`Émise le ${new Date().toLocaleDateString("fr-FR")}`), W - M, 24, { align: "right" });
+
+  // ----- Parties -----
+  doc.setTextColor(30, 35, 51);
+  doc.setFont("helvetica", "bold"); doc.setFontSize(9); doc.setTextColor(...GREY);
+  doc.text("PRESTATAIRE", M, 44); doc.text("CLIENT", W / 2 + 4, 44);
+  doc.setFontSize(12); doc.setTextColor(30, 35, 51);
+  doc.text(T(s.prestataire || "—"), M, 51, { maxWidth: W / 2 - M - 6 });
+  doc.text(T(s.client || "—"), W / 2 + 4, 51, { maxWidth: W / 2 - M - 6 });
+
+  const tableStyle = {
+    theme: "grid", margin: { left: M, right: M },
+    styles: { font: "helvetica", fontSize: 9.5, cellPadding: 2.4, lineColor: [225, 229, 240], lineWidth: .2, textColor: [30, 35, 51] },
+    headStyles: { fillColor: BLUE, textColor: 255, fontStyle: "bold" },
+    alternateRowStyles: { fillColor: [250, 251, 255] }
+  };
+  let y = 60;
+  const title = (txt) => {
+    if (y > 262) { doc.addPage(); y = 20; }
+    doc.setFont("helvetica", "bold"); doc.setFontSize(11); doc.setTextColor(...BLUE);
+    doc.text(T(txt), M, y); y += 2;
+  };
+  const after = () => { y = doc.lastAutoTable.finalY + 9; };
+
+  // ----- Paramètres -----
+  title("Paramètres de facturation");
+  doc.autoTable({ ...tableStyle, startY: y + 1, body: [
+    ["Période", T(period)],
+    ["Tarif horaire", T(fmtMoney(s.rate) + " HT")],
+    ["Heures normales par jour", T(fmtNum(s.hpd) + " h")],
+    ["Taux de majoration des heures supplémentaires", T(fmtNum(s.maj) + " %") + T(` (taux horaire majoré : ${fmtMoney(r.tauxHS)})`)]
+  ], columnStyles: { 0: { fontStyle: "bold", cellWidth: 80 } } });
+  after();
+
+  // ----- Jours -----
+  title("Jours de la période");
+  const holDetail = r.holidays.filter(h => h.active && !h.weekend)
+    .map(h => `${h.label} (${h.date.slice(8)}/${h.date.slice(5, 7)})`).join(", ");
+  doc.autoTable({ ...tableStyle, startY: y + 1, body: [
+    ["Jours ouvrés (lundi au vendredi, hors jours fériés)", String(r.joursOuvres)],
+    ["Jours fériés exclus", r.joursFeries ? `${r.joursFeries} : ${T(holDetail)}` : "0"],
+    ["Jours d'absence", String(r.joursAbsence)],
+    ["Jours facturables", `${r.joursOuvres} − ${r.joursAbsence} = ${r.joursFacturables}`]
+  ], columnStyles: { 0: { fontStyle: "bold", cellWidth: 80 } } });
+  after();
+
+  // ----- Absences -----
+  title("Détail des absences");
+  if (r.absences.length) {
+    doc.autoTable({ ...tableStyle, startY: y + 1, head: [["Date", "Jours déduits", "Heures non facturées"]],
+      body: r.absences.map(k => [T(fmtDateLong(k)), "1", T(fmtNum(s.hpd) + " h")]),
+      foot: [["Total", String(r.joursAbsence), T(fmtNum(r.joursAbsence * s.hpd) + " h")]],
+      footStyles: { fillColor: LIGHT, textColor: BLUE, fontStyle: "bold" },
+      columnStyles: { 1: { halign: "center" }, 2: { halign: "right" } } });
+  } else {
+    doc.autoTable({ ...tableStyle, startY: y + 1, body: [["Aucune absence sur la période."]] });
+  }
+  after();
+
+  // ----- Heures supplémentaires -----
+  title("Détail des heures supplémentaires");
+  if (r.overtime.length) {
+    doc.autoTable({ ...tableStyle, startY: y + 1,
+      head: [["Date", "Heures sup.", `Taux majoré`, "Montant HT"]],
+      body: r.overtime.map(o => [T(fmtDateLong(o.date)), T(fmtNum(o.hours) + " h"), T(fmtMoney(r.tauxHS)), T(fmtMoney(round2(o.hours * r.tauxHS)))]),
+      foot: [["Total", T(fmtNum(r.heuresSup) + " h"), "", T(fmtMoney(r.montantHS))]],
+      footStyles: { fillColor: LIGHT, textColor: BLUE, fontStyle: "bold" },
+      columnStyles: { 1: { halign: "right" }, 2: { halign: "right" }, 3: { halign: "right" } } });
+  } else {
+    doc.autoTable({ ...tableStyle, startY: y + 1, body: [["Aucune heure supplémentaire sur la période."]] });
+  }
+  after();
+
+  // ----- Calcul détaillé -----
+  title("Détail des calculs");
+  doc.autoTable({ ...tableStyle, startY: y + 1,
+    head: [["Poste", "Calcul", "Montant"]],
+    body: [
+      ["Heures normales facturables", T(`${r.joursFacturables} j × ${fmtNum(s.hpd)} h = ${fmtNum(r.heuresNormales)} h`), ""],
+      ["Montant des heures normales", T(`${fmtNum(r.heuresNormales)} h × ${fmtMoney(s.rate)}`), T(fmtMoney(r.montantNormal))],
+      ["Montant des heures supplémentaires", T(`${fmtNum(r.heuresSup)} h × ${fmtMoney(s.rate)} × (1 + ${fmtNum(s.maj)} %)`), T(fmtMoney(r.montantHS))],
+      ["Pour information : montant des absences non facturées", T(`${r.joursAbsence} j × ${fmtNum(s.hpd)} h × ${fmtMoney(s.rate)} (déjà exclu ci-dessus)`), T(fmtMoney(r.montantAbsences))]
+    ],
+    columnStyles: { 0: { fontStyle: "bold", cellWidth: 62 }, 2: { halign: "right", cellWidth: 32 } },
+    didParseCell: d => { if (d.row.index === 3 && d.section === "body") { d.cell.styles.textColor = GREY; d.cell.styles.fontStyle = "italic"; } }
+  });
+  y = doc.lastAutoTable.finalY + 8;
+
+  // ----- Total -----
+  if (y > 255) { doc.addPage(); y = 20; }
+  doc.setFillColor(...BLUE); doc.roundedRect(M, y, W - 2 * M, 22, 3, 3, "F");
+  doc.setTextColor(255); doc.setFont("helvetica", "bold"); doc.setFontSize(12);
+  doc.text("TOTAL HT À FACTURER", M + 6, y + 9);
+  doc.setFont("helvetica", "normal"); doc.setFontSize(9);
+  doc.text(T(`${fmtMoney(r.montantNormal)} (normales) + ${fmtMoney(r.montantHS)} (heures sup.)`), M + 6, y + 16);
+  doc.setFont("helvetica", "bold"); doc.setFontSize(20);
+  doc.text(T(fmtMoney(r.total)), W - M - 6, y + 14, { align: "right" });
+
+  // ----- Pied de page -----
+  const pages = doc.getNumberOfPages();
+  for (let i = 1; i <= pages; i++) {
+    doc.setPage(i); doc.setFont("helvetica", "normal"); doc.setFontSize(8); doc.setTextColor(...GREY);
+    doc.text(T(`${invNo} – ${period}`), M, 289);
+    doc.text(`Page ${i} / ${pages}`, W - M, 289, { align: "right" });
+  }
+
+  const safe = (s.prestataire || "prestataire").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/gi, "_").replace(/^_|_$/g, "");
+  doc.save(`Facture_${safe}_${s.year}-${pad(s.month)}.pdf`);
+}
+$("btnPdf").addEventListener("click", generatePdf);
+
+/* ============================================================================
+   INITIALISATION
+   ========================================================================== */
+(function init() {
+  $("month").innerHTML = MOIS.map((m, i) => `<option value="${i + 1}">${m}</option>`).join("");
+  loadState();
+  const s = state.settings;
+  $("prestataire").value = s.prestataire; $("client").value = s.client;
+  $("month").value = s.month; $("year").value = s.year;
+  $("rate").value = s.rate; $("hpd").value = s.hpd; $("maj").value = s.maj;
+  readSettings();
+  renderAll();
+})();
+</script>
+</body>
+</html>
